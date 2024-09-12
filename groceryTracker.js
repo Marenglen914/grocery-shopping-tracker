@@ -1,117 +1,110 @@
-// Import the readline module for handling user input in the console
-const readline = require('readline');
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const winston = require('winston');
 
-// Create readline interface
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout
+// Set up logging with Winston
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.json(),
+  transports: [
+    new winston.transports.File({ filename: 'server.log' }),
+  ],
 });
 
-// Array to hold grocery items
-let groceryList = [];
+// Path to the JSON file for persistence
+const groceryFilePath = path.join(__dirname, 'groceryList.json');
 
-// Function to display the menu
-function displayMenu() {
-  console.log(`
-  Grocery List Tracker:
-  1. View grocery list
-  2. Add item to grocery list
-  3. Remove item from grocery list
-  4. Mark item as bought
-  5. Exit
-  `);
-  rl.question('Select an option: ', handleMenu);
-}
-
-// Function to display the grocery list
-function displayGroceryList() {
-  if (groceryList.length === 0) {
-    console.log("Your grocery list is empty.");
+// Load grocery data from file
+function loadGroceryList() {
+  if (fs.existsSync(groceryFilePath)) {
+    const data = fs.readFileSync(groceryFilePath);
+    return JSON.parse(data);
   } else {
-    console.log("\nYour Grocery List:");
-    groceryList.forEach((item, index) => {
-      console.log(
-        `${index + 1}. ${item.name} - Quantity: ${item.quantity}, Price: $${item.price.toFixed(2)}, Bought: ${item.bought ? 'Yes' : 'No'}`
-      );
-    });
+    return [];
   }
-  displayMenu();
 }
 
-// Function to add an item to the grocery list
-function addItem() {
-  rl.question('Enter item name: ', (name) => {
-    rl.question('Enter quantity: ', (quantity) => {
-      rl.question('Enter price: ', (price) => {
-        const item = {
-          name,
-          quantity: parseInt(quantity),
-          price: parseFloat(price),
-          bought: false,
-        };
-        groceryList.push(item);
-        console.log(`${name} has been added to your grocery list.`);
-        displayMenu();
+// Save grocery data to file
+function saveGroceryList(data) {
+  fs.writeFileSync(groceryFilePath, JSON.stringify(data, null, 2));
+}
+
+// Initialize the grocery list from file
+let groceryList = loadGroceryList();
+
+// Create the server
+const server = http.createServer((req, res) => {
+  const { method, url } = req;
+
+  // GET - View grocery list
+  if (method === 'GET' && url === '/groceries') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(groceryList));
+    logger.info('Grocery list viewed');
+  
+  // POST - Add an item
+  } else if (method === 'POST' && url === '/groceries') {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk.toString();
+    });
+    req.on('end', () => {
+      const { name, price, quantity, bought } = JSON.parse(body);
+      const newItem = { name, price: parseFloat(price), quantity: parseInt(quantity), bought: bought || false };
+      groceryList.push(newItem);
+      saveGroceryList(groceryList);
+      res.writeHead(201, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(newItem));
+      logger.info(`Item added: ${name}`);
+    });
+  
+  // PUT - Edit an item
+  } else if (method === 'PUT' && url.startsWith('/groceries/')) {
+    const index = parseInt(url.split('/')[2]);
+    if (index >= 0 && index < groceryList.length) {
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk.toString();
       });
-    });
-  });
-}
-
-// Function to remove an item from the grocery list
-function removeItem() {
-  displayGroceryList();
-  rl.question('Enter the number of the item to remove: ', (index) => {
-    const itemIndex = parseInt(index) - 1;
-    if (itemIndex >= 0 && itemIndex < groceryList.length) {
-      const removedItem = groceryList.splice(itemIndex, 1);
-      console.log(`${removedItem[0].name} has been removed from your list.`);
+      req.on('end', () => {
+        const updatedItem = JSON.parse(body);
+        groceryList[index] = { ...groceryList[index], ...updatedItem };
+        saveGroceryList(groceryList);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(groceryList[index]));
+        logger.info(`Item edited: ${groceryList[index].name}`);
+      });
     } else {
-      console.log("Invalid item number.");
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ message: 'Item not found' }));
     }
-    displayMenu();
-  });
-}
 
-// Function to mark an item as bought
-function markItemAsBought() {
-  displayGroceryList();
-  rl.question('Enter the number of the item to mark as bought: ', (index) => {
-    const itemIndex = parseInt(index) - 1;
-    if (itemIndex >= 0 && itemIndex < groceryList.length) {
-      groceryList[itemIndex].bought = true;
-      console.log(`${groceryList[itemIndex].name} has been marked as bought.`);
+  // DELETE - Remove an item
+  } else if (method === 'DELETE' && url.startsWith('/groceries/')) {
+    const index = parseInt(url.split('/')[2]);
+    if (index >= 0 && index < groceryList.length) {
+      const removedItem = groceryList.splice(index, 1);
+      saveGroceryList(groceryList);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ message: `Item removed: ${removedItem[0].name}` }));
+      logger.info(`Item removed: ${removedItem[0].name}`);
     } else {
-      console.log("Invalid item number.");
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ message: 'Item not found' }));
     }
-    displayMenu();
-  });
-}
 
-// Function to handle the menu selection
-function handleMenu(option) {
-  switch (option) {
-    case '1':
-      displayGroceryList();
-      break;
-    case '2':
-      addItem();
-      break;
-    case '3':
-      removeItem();
-      break;
-    case '4':
-      markItemAsBought();
-      break;
-    case '5':
-      console.log("Goodbye!");
-      rl.close();
-      break;
-    default:
-      console.log("Invalid option. Please try again.");
-      displayMenu();
-      break;
+  // Handle unknown routes
+  } else {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ message: 'Route not found' }));
+    logger.warn(`Route not found: ${method} ${url}`);
   }
-}
+});
 
-// Start the application
-displayMenu();
+// Start the server
+const PORT = 3000;
+server.listen(PORT, () => {
+  console.log(`Server is listening on port ${PORT}`);
+  logger.info(`Server started on port ${PORT}`);
+});

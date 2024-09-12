@@ -1,0 +1,17 @@
+# Node modules folder
+node_modules/
+
+# Log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+server.log
+
+# Environment variable file
+.env
+
+# OS files
+.DS_Store
+
+# Grocery list JSON file (optional if you don't want to track the grocery list in version control)
+groceryList.json
